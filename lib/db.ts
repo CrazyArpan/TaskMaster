@@ -1,10 +1,20 @@
 import mongoose from "mongoose"
 
+if (!process.env.MONGODB_URI) {
+  throw new Error("Please define the MONGODB_URI environment variable inside .env.local")
+}
+
 const MONGODB_URI = process.env.MONGODB_URI
 
-// Global is used here to maintain a cached connection across hot reloads
-// in development. This prevents connections growing exponentially
-// during API Route usage.
+interface MongooseCache {
+  conn: typeof mongoose | null
+  promise: Promise<typeof mongoose> | null
+}
+
+declare global {
+  var mongoose: MongooseCache
+}
+
 let cached = global.mongoose
 
 if (!cached) {
@@ -12,48 +22,33 @@ if (!cached) {
 }
 
 async function connectDB() {
-  // Return early with null connection if no URI is provided
-  // This allows the app to build without a valid MongoDB URI
-  if (!MONGODB_URI) {
-    console.warn("MongoDB URI not found. Database connection will be skipped.")
-    return null
-  }
-
-  // Check URI format without throwing an error that would break the build
-  const isValidUri = MONGODB_URI.startsWith("mongodb://") || MONGODB_URI.startsWith("mongodb+srv://")
-
-  if (!isValidUri) {
-    console.error("Invalid MongoDB URI format. URI must start with 'mongodb://' or 'mongodb+srv://'")
-    return null
-  }
-
   if (cached.conn) {
+    console.log("Using cached database connection")
     return cached.conn
   }
 
   if (!cached.promise) {
+    console.log("Creating new database connection")
     const opts = {
       bufferCommands: false,
     }
 
-    cached.promise = mongoose
-      .connect(MONGODB_URI, opts)
-      .then((mongoose) => {
-        return mongoose
-      })
-      .catch((err) => {
-        console.error("MongoDB connection error:", err)
-        cached.promise = null
-        return null
-      })
+    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
+      console.log("Database connected successfully")
+      return mongoose
+    }).catch((error) => {
+      console.error("Database connection error:", error)
+      throw error
+    })
   }
 
   try {
     cached.conn = await cached.promise
+    console.log("Database connection established")
   } catch (e) {
+    console.error("Failed to establish database connection:", e)
     cached.promise = null
-    console.error("Error resolving MongoDB connection:", e)
-    return null
+    throw e
   }
 
   return cached.conn

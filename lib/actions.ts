@@ -1,157 +1,227 @@
 "use server"
 
-import connectDB from "@/lib/db"
-import Task from "@/models/Task"
 import { revalidatePath } from "next/cache"
 import { currentUser } from "@clerk/nextjs/server"
+import connectDB from "@/lib/db"
+import Task from "@/models/Task"
+import type { ITask } from "@/models/Task"
 
-export async function getTasks(filter = {}) {
+export async function getTasks(filter: any = {}) {
   try {
-    const conn = await connectDB()
+    console.log("Starting getTasks function")
+    await connectDB()
+    console.log("Database connected")
+    
+    const user = await currentUser()
+    console.log("Current user:", user?.id)
 
-    // If connection failed, return empty array
-    if (!conn) {
-      console.warn("Database connection failed. Returning empty tasks array.")
+    if (!user) {
+      console.log("No user found, returning empty array")
       return []
     }
 
-    const tasks = await Task.find(filter).sort({ createdAt: -1 })
-    return JSON.parse(JSON.stringify(tasks))
+    // Ensure userId is always included in the query
+    const query = { userId: user.id, ...filter }
+    console.log("Fetching tasks with query:", query)
+
+    const tasks = await Task.find(query)
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+
+    console.log("Raw tasks from database:", tasks)
+    
+    // Convert to plain objects to ensure serialization
+    const serializedTasks = JSON.parse(JSON.stringify(tasks))
+    console.log("Serialized tasks:", serializedTasks)
+    
+    return serializedTasks
   } catch (error) {
-    console.error("Error fetching tasks:", error)
-    // Return empty array instead of throwing error to prevent build failures
+    console.error("Error in getTasks:", error)
     return []
   }
 }
 
 export async function createTask(formData: FormData) {
-  const user = await currentUser()
-  
-  if (!user) {
-    throw new Error("Unauthorized")
-  }
-
-  const title = formData.get("title") as string
-  const description = formData.get("description") as string
-  const priority = (formData.get("priority") as string) || "medium"
-  const dueDateStr = formData.get("dueDate") as string
-
-  if (!title || !description) {
-    throw new Error("Title and description are required")
-  }
-
-  const taskData: any = {
-    title,
-    description,
-    priority,
-    userId: user.id
-  }
-
-  if (dueDateStr) {
-    taskData.dueDate = new Date(dueDateStr)
-  }
-
   try {
-    const conn = await connectDB()
-    if (!conn) {
-      throw new Error("Database connection failed")
+    console.log("Starting createTask function")
+    await connectDB()
+    console.log("Database connected")
+    
+    const user = await currentUser()
+    console.log("Current user:", user?.id)
+
+    if (!user) {
+      console.log("No user found, throwing unauthorized error")
+      throw new Error("Unauthorized")
     }
 
-    await Task.create(taskData)
+    const title = formData.get("title") as string
+    const description = formData.get("description") as string
+    const priority = (formData.get("priority") as string) || "medium"
+    const dueDateStr = formData.get("dueDate") as string
+
+    console.log("Form data received:", { title, description, priority, dueDateStr })
+
+    if (!title?.trim() || !description?.trim()) {
+      console.log("Missing required fields")
+      throw new Error("Title and description are required")
+    }
+
+    const taskData = {
+      title: title.trim(),
+      description: description.trim(),
+      priority,
+      userId: user.id,
+      completed: false,
+      ...(dueDateStr && { dueDate: new Date(dueDateStr) }),
+    }
+
+    console.log("Creating task with data:", taskData)
+    const task = await Task.create(taskData)
+    console.log("Task created successfully:", task)
+
     revalidatePath("/")
-    return { success: true }
+    const serializedTask = JSON.parse(JSON.stringify(task))
+    console.log("Serialized task:", serializedTask)
+    
+    return { success: true, task: serializedTask }
   } catch (error) {
-    console.error("Error creating task:", error)
-    throw new Error("Failed to create task")
+    console.error("Error in createTask:", error)
+    throw error
   }
 }
 
 export async function updateTask(taskId: string, formData: FormData) {
-  const title = formData.get("title") as string
-  const description = formData.get("description") as string
-  const completed = formData.get("completed") === "true"
-  const priority = formData.get("priority") as string
-  const dueDateStr = formData.get("dueDate") as string
-
-  if (!title || !description) {
-    throw new Error("Title and description are required")
-  }
-
-  const updateData: any = {
-    title,
-    description,
-    completed,
-    priority,
-  }
-
-  if (dueDateStr) {
-    updateData.dueDate = new Date(dueDateStr)
-  } else {
-    // If dueDate is empty, set it to null
-    updateData.dueDate = null
-  }
-
   try {
-    const conn = await connectDB()
-    if (!conn) {
-      throw new Error("Database connection failed")
+    await connectDB()
+    const user = await currentUser()
+
+    if (!user) {
+      throw new Error("Unauthorized")
     }
 
-    await Task.findByIdAndUpdate(taskId, updateData)
+    const title = formData.get("title") as string
+    const description = formData.get("description") as string
+    const completed = formData.get("completed") === "true"
+    const priority = formData.get("priority") as string
+    const dueDateStr = formData.get("dueDate") as string
+
+    if (!title?.trim() || !description?.trim()) {
+      throw new Error("Title and description are required")
+    }
+
+    const updateData = {
+      title: title.trim(),
+      description: description.trim(),
+      completed,
+      priority,
+      ...(dueDateStr ? { dueDate: new Date(dueDateStr) } : { dueDate: null }),
+    }
+
+    const task = await Task.findOneAndUpdate(
+      { _id: taskId, userId: user.id },
+      updateData,
+      { new: true }
+    )
+
+    if (!task) {
+      throw new Error("Task not found")
+    }
+
     revalidatePath("/")
-    return { success: true }
+    return { success: true, task: JSON.parse(JSON.stringify(task)) }
   } catch (error) {
     console.error("Error updating task:", error)
-    throw new Error("Failed to update task")
+    throw error
   }
 }
 
 export async function deleteTask(taskId: string) {
   try {
-    const conn = await connectDB()
-    if (!conn) {
-      throw new Error("Database connection failed")
+    await connectDB()
+    const user = await currentUser()
+
+    if (!user) {
+      throw new Error("Unauthorized")
     }
 
-    await Task.findByIdAndDelete(taskId)
+    const task = await Task.findOneAndDelete({ _id: taskId, userId: user.id })
+
+    if (!task) {
+      throw new Error("Task not found")
+    }
+
     revalidatePath("/")
     return { success: true }
   } catch (error) {
     console.error("Error deleting task:", error)
-    throw new Error("Failed to delete task")
+    throw error
   }
 }
 
 export async function toggleTaskStatus(taskId: string, completed: boolean) {
   try {
-    const conn = await connectDB()
-    if (!conn) {
-      throw new Error("Database connection failed")
+    await connectDB()
+    const user = await currentUser()
+
+    if (!user) {
+      throw new Error("Unauthorized")
     }
 
-    await Task.findByIdAndUpdate(taskId, { completed })
+    const task = await Task.findOneAndUpdate(
+      { _id: taskId, userId: user.id },
+      { completed },
+      { new: true }
+    )
+
+    if (!task) {
+      throw new Error("Task not found")
+    }
+
     revalidatePath("/")
-    return { success: true }
+    return { success: true, task: JSON.parse(JSON.stringify(task)) }
   } catch (error) {
     console.error("Error toggling task status:", error)
-    throw new Error("Failed to toggle task status")
+    throw error
   }
 }
 
 export async function searchTasks(query: string) {
   try {
-    const conn = await connectDB()
-    if (!conn) {
-      console.warn("Database connection failed. Returning empty search results.")
+    console.log("Starting searchTasks function with query:", query)
+    await connectDB()
+    console.log("Database connected")
+    
+    const user = await currentUser()
+    console.log("Current user:", user?.id)
+
+    if (!user) {
+      console.log("No user found, returning empty array")
       return []
     }
 
+    console.log("Searching tasks for user:", user.id)
     const tasks = await Task.find({
-      $or: [{ title: { $regex: query, $options: "i" } }, { description: { $regex: query, $options: "i" } }],
-    }).sort({ createdAt: -1 })
-    return JSON.parse(JSON.stringify(tasks))
+      userId: user.id,
+      $or: [
+        { title: { $regex: query, $options: "i" } },
+        { description: { $regex: query, $options: "i" } },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec()
+
+    console.log("Raw search results:", tasks)
+    
+    // Convert to plain objects to ensure serialization
+    const serializedTasks = JSON.parse(JSON.stringify(tasks))
+    console.log("Serialized search results:", serializedTasks)
+    
+    return serializedTasks
   } catch (error) {
-    console.error("Error searching tasks:", error)
+    console.error("Error in searchTasks:", error)
     return []
   }
 }

@@ -33,15 +33,21 @@ export default function CreateTaskForm() {
 
     setIsSubmitting(true)
     try {
-      await createTask(formData)
-      toast({
-        title: "Success",
-        description: "Task created successfully",
-      })
-      const form = document.getElementById("create-task-form") as HTMLFormElement
-      form.reset()
-      setDate(undefined)
+      const result = await createTask(formData)
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: "Task created successfully",
+        })
+        const form = document.getElementById("create-task-form") as HTMLFormElement
+        form.reset()
+        setDate(undefined)
+        window.location.reload() // Force a full page reload
+      } else {
+        throw new Error("Failed to create task")
+      }
     } catch (error) {
+      console.error("Error in form submission:", error)
       toast({
         title: "Error",
         description: "Failed to create task",

@@ -1,12 +1,12 @@
-import mongoose, { Schema } from "mongoose"
+import mongoose, { Schema, Document } from "mongoose"
 
-export interface ITask {
-  _id?: string
+export interface ITask extends Document {
   title: string
   description: string
   completed: boolean
   priority: "low" | "medium" | "high"
   dueDate?: Date
+  userId: string
   createdAt: Date
   updatedAt: Date
 }
@@ -15,12 +15,14 @@ const TaskSchema = new Schema<ITask>(
   {
     title: {
       type: String,
-      required: [true, "Please provide a title for this task"],
+      required: [true, "Title is required"],
+      trim: true,
       maxlength: [60, "Title cannot be more than 60 characters"],
     },
     description: {
       type: String,
-      required: [true, "Please provide a description for this task"],
+      required: [true, "Description is required"],
+      trim: true,
       maxlength: [1000, "Description cannot be more than 1000 characters"],
     },
     completed: {
@@ -36,11 +38,23 @@ const TaskSchema = new Schema<ITask>(
       type: Date,
       required: false,
     },
+    userId: {
+      type: String,
+      required: [true, "User ID is required"],
+      index: true,
+    },
   },
   {
     timestamps: true,
-  },
+  }
 )
 
-export default mongoose.models.Task || mongoose.model<ITask>("Task", TaskSchema)
+// Create indexes
+TaskSchema.index({ userId: 1, createdAt: -1 })
+TaskSchema.index({ userId: 1, completed: 1 })
+TaskSchema.index({ userId: 1, priority: 1 })
+
+const Task = mongoose.models.Task || mongoose.model<ITask>("Task", TaskSchema)
+
+export default Task
 
