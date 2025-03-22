@@ -1,23 +1,27 @@
 "use client"
 
 import { useState } from "react"
-import { createTask } from "@/lib/actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
-import { PlusCircle } from "lucide-react"
+import { PlusCircle, Calendar as CalendarIcon } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Calendar } from "@/components/ui/calendar"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import DatePicker from "react-datepicker"
+import "react-datepicker/dist/react-datepicker.css"
+import "@/styles/datepicker.css"
 import { format } from "date-fns"
-import { CalendarIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { SignInButton, useAuth } from "@clerk/nextjs"
+import { Task } from "@/lib/models/task"
 
-export default function CreateTaskForm() {
+interface CreateTaskFormProps {
+  onTaskCreated?: (task: Task) => void
+}
+
+export default function CreateTaskForm({ onTaskCreated }: CreateTaskFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [date, setDate] = useState<Date | undefined>(undefined)
+  const [date, setDate] = useState<Date | null>(null)
   const { toast } = useToast()
   const { isSignedIn } = useAuth()
 
@@ -33,18 +37,28 @@ export default function CreateTaskForm() {
 
     setIsSubmitting(true)
     try {
-      const result = await createTask(formData)
-      if (result.success) {
-        toast({
-          title: "Success",
-          description: "Task created successfully",
-        })
-        const form = document.getElementById("create-task-form") as HTMLFormElement
-        form.reset()
-        setDate(undefined)
-        window.location.reload() // Force a full page reload
-      } else {
+      const response = await fetch("/api/tasks", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
         throw new Error("Failed to create task")
+      }
+
+      const newTask = await response.json()
+      
+      toast({
+        title: "Success",
+        description: "Task created successfully",
+      })
+
+      const form = document.getElementById("create-task-form") as HTMLFormElement
+      form.reset()
+      setDate(null)
+
+      if (onTaskCreated) {
+        onTaskCreated(newTask)
       }
     } catch (error) {
       console.error("Error in form submission:", error)
@@ -63,14 +77,24 @@ export default function CreateTaskForm() {
       <div className="mb-8 p-4 bg-card rounded-lg shadow-sm border text-center">
         <h2 className="text-xl font-semibold mb-4">Create New Task</h2>
         <p className="text-muted-foreground mb-4">Please sign in to create tasks</p>
-        <SignInButton mode="modal">
-          <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-            Sign In
-          </button>
-        </SignInButton>
       </div>
     )
   }
+
+  const CustomInput = ({ value, onClick }: { value?: string; onClick?: () => void }) => (
+    <Button
+      type="button"
+      variant="outline"
+      className={cn(
+        "w-full justify-start text-left font-normal",
+        !date && "text-muted-foreground"
+      )}
+      onClick={onClick}
+    >
+      <CalendarIcon className="mr-2 h-4 w-4" />
+      {value || "Select due date"}
+    </Button>
+  )
 
   return (
     <div className="mb-8 p-4 bg-card rounded-lg shadow-sm border">
@@ -113,28 +137,25 @@ export default function CreateTaskForm() {
           </div>
           <div>
             <label htmlFor="dueDate" className="block text-sm font-medium mb-1">
-              Due Date (Optional)
+              Due Date
             </label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"outline"}
-                  className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {date ? format(date, "PPP") : "Pick a date"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={setDate}
-                  initialFocus
-                  disabled={(date) => date < new Date()}
-                />
-              </PopoverContent>
-            </Popover>
+            <DatePicker
+              selected={date}
+              onChange={(newDate: Date | null) => setDate(newDate)}
+              customInput={<CustomInput />}
+              dateFormat="MMMM d, yyyy"
+              minDate={new Date()}
+              placeholderText="Select due date"
+              showPopperArrow={false}
+              calendarClassName="shadow-lg border rounded-lg"
+              wrapperClassName="w-full"
+              popperClassName="z-50"
+              popperPlacement="bottom-start"
+              shouldCloseOnSelect
+              isClearable
+              showTimeSelect={false}
+              fixedHeight
+            />
             {date && (
               <Input 
                 type="hidden" 
